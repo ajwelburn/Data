@@ -69,26 +69,29 @@ def scrape_single_rider(url, headers):
              return None # Can't find name, skip this rider
         rider_name = rider_name_element.get_text(strip=True).split('»')[0].strip()
 
-        # --- NEW LOGIC TO COUNT RACE DAYS FROM THE RESULTS TABLE ---
+        # --- REVISED LOGIC TO CORRECTLY IDENTIFY ONE-DAY RACES ---
         race_day_count = 0
         
         # The race results are in a table with class 'basic'.
         results_table = soup.find('table', class_='basic')
         
         if results_table:
-            # Find all the rows in the table body.
-            # Using .find('tbody') is good practice to avoid header rows.
             table_body = results_table.find('tbody')
             if table_body:
                 rows = table_body.find_all('tr')
                 for row in rows:
-                    # The date is typically in the first column (<td>).
-                    date_cell = row.find('td')
-                    if date_cell:
-                        date_text = date_cell.get_text(strip=True)
-                        # Count only if it's a single date (no '›') and the cell is not empty.
-                        if '›' not in date_text and date_text:
-                            race_day_count += 1
+                    # Individual stages of a tour are in rows with the 'indent' class.
+                    # We want to ignore these completely.
+                    is_stage_or_sub_result = 'indent' in row.get('class', [])
+                    
+                    if not is_stage_or_sub_result:
+                        # Now we only check the non-indented rows for a single date.
+                        date_cell = row.find('td')
+                        if date_cell:
+                            date_text = date_cell.get_text(strip=True)
+                            # A single-day race has a date and no '›' symbol.
+                            if date_text and '›' not in date_text:
+                                race_day_count += 1
         
         return {'Rider Name': rider_name, 'Number of Race Days': race_day_count}
 
@@ -145,4 +148,3 @@ if st.button('Fetch All Rider Data'):
             st.dataframe(df)
         else:
             st.error("Could not retrieve data for any of the riders.")
-
