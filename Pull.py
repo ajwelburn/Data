@@ -20,39 +20,33 @@ def get_rider_urls(team_url, headers):
         urls = []
         base_url = "https://www.procyclingstats.com/"
 
-        # --- NEW FOCUSED FIX STARTS HERE ---
-        # We will locate the specific "Riders" heading first, then find the list under it.
-        # This is more reliable than searching the whole page.
-        riders_heading = soup.find('h4', string=lambda t: t and 'Riders' in t)
+        # --- NEW ROBUST FIX STARTS HERE ---
+        # Instead of looking for a specific heading, we'll find all lists (<ul>)
+        # and check which one contains the rider links. This is more resilient.
+        all_lists = soup.find_all('ul')
+        rider_list_found = False
+
+        for list_element in all_lists:
+            # For each list, find all the links within it.
+            links_in_list = list_element.find_all('a')
+            potential_rider_links = []
+            
+            for link in links_in_list:
+                # Check if the link looks like a rider profile link.
+                if link.has_attr('href') and 'rider/' in link['href']:
+                    full_url = base_url + link['href']
+                    if full_url not in potential_rider_links:
+                        potential_rider_links.append(full_url)
+            
+            # If we found valid rider links, we assume this is the correct list.
+            if potential_rider_links:
+                urls = potential_rider_links
+                rider_list_found = True
+                break # Stop searching after finding the first valid list.
+        # --- NEW ROBUST FIX ENDS HERE ---
         
-        if not riders_heading:
-            st.error("Could not find the 'Riders' heading on the team page. The structure may have changed.")
-            return []
-
-        # The list of riders is usually in the <ul> tag that comes after the heading.
-        # We use find_next() as it's more flexible than find_next_sibling().
-        rider_list_ul = riders_heading.find_next('ul')
-
-        if not rider_list_ul:
-            st.error("Found the 'Riders' heading, but could not find the list of riders (<ul>) associated with it.")
-            return []
-
-        # Now, we only search for links within that specific list.
-        rider_links = rider_list_ul.find_all('a')
-        
-        if not rider_links:
-            st.error("Found the rider list, but it appears to be empty.")
-            return []
-
-        for link in rider_links:
-            if link.has_attr('href') and 'rider/' in link['href']:
-                full_url = base_url + link['href']
-                if full_url not in urls:
-                    urls.append(full_url)
-        # --- NEW FOCUSED FIX ENDS HERE ---
-        
-        if not urls:
-            st.error("Found the rider list, but couldn't extract any valid rider profile links.")
+        if not rider_list_found:
+            st.error("Could not find a list containing rider links on the page. The website structure may have changed.")
             return []
 
         return urls
