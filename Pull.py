@@ -20,27 +20,26 @@ def get_rider_urls(team_url, headers):
         urls = []
         base_url = "https://www.procyclingstats.com/"
 
-        # Find the main table containing the riders.
-        rider_list_table = soup.find('table', class_='basic')
-        if not rider_list_table:
-            st.error("Could not find the rider list table on the team page.")
+        # --- FIX STARTS HERE ---
+        # The website has changed. We are now looking for a div, not a table.
+        rider_list_container = soup.find('div', class_='team_riders_list')
+        if not rider_list_container:
+            st.error("Could not find the rider list container ('div' with class 'team_riders_list') on the team page.")
             return []
 
-        # Find the body of the table.
-        rider_table_body = rider_list_table.find('tbody')
-        if not rider_table_body:
-            st.error("Could not find the table body on the team page.")
+        # Find all the links (a tags) within that container.
+        rider_links = rider_list_container.find_all('a')
+        if not rider_links:
+            st.error("Found the container, but it contains no rider links.")
             return []
 
-        # Loop through each row to find the rider links.
-        for row in rider_table_body.find_all('tr'):
-            cell = row.find('td') # The link is in the first cell
-            if cell:
-                link = cell.find('a')
-                if link and link.has_attr('href'):
-                    # The links are relative, so we need to add the base URL.
-                    full_url = base_url + link['href']
-                    urls.append(full_url)
+        # Loop through each link to build the full URL.
+        for link in rider_links:
+            if link and link.has_attr('href') and 'rider/' in link['href']:
+                # The links are relative, so we need to add the base URL.
+                full_url = base_url + link['href']
+                urls.append(full_url)
+        # --- FIX ENDS HERE ---
         
         return urls
 
@@ -127,3 +126,4 @@ if st.button('Fetch All Rider Data'):
             st.dataframe(df)
         else:
             st.error("Could not retrieve data for any of the riders.")
+
