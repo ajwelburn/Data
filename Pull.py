@@ -20,29 +20,39 @@ def get_rider_urls(team_url, headers):
         urls = []
         base_url = "https://www.procyclingstats.com/"
 
-        # --- FINAL FIX STARTS HERE ---
-        # Instead of looking for a specific section, let's find ALL links on the page
-        # and filter them for the ones that point to a rider's profile.
-        # This is much more robust against layout changes.
-        all_links = soup.find_all('a')
-
-        if not all_links:
-            st.error("Could not find any links on the page.")
+        # --- NEW FOCUSED FIX STARTS HERE ---
+        # We will locate the specific "Riders" heading first, then find the list under it.
+        # This is more reliable than searching the whole page.
+        riders_heading = soup.find('h4', string=lambda t: t and 'Riders' in t)
+        
+        if not riders_heading:
+            st.error("Could not find the 'Riders' heading on the team page. The structure may have changed.")
             return []
 
-        # Loop through every single link we found.
-        for link in all_links:
-            # Check if the link has an 'href' and if that 'href' contains 'rider/'.
-            if link and link.has_attr('href') and 'rider/' in link['href']:
-                # The links are relative, so we need to add the base URL.
+        # The list of riders is usually in the <ul> tag that comes after the heading.
+        # We use find_next() as it's more flexible than find_next_sibling().
+        rider_list_ul = riders_heading.find_next('ul')
+
+        if not rider_list_ul:
+            st.error("Found the 'Riders' heading, but could not find the list of riders (<ul>) associated with it.")
+            return []
+
+        # Now, we only search for links within that specific list.
+        rider_links = rider_list_ul.find_all('a')
+        
+        if not rider_links:
+            st.error("Found the rider list, but it appears to be empty.")
+            return []
+
+        for link in rider_links:
+            if link.has_attr('href') and 'rider/' in link['href']:
                 full_url = base_url + link['href']
-                # We add a check to make sure we don't add the same link twice.
-                if full_url not in urls: 
+                if full_url not in urls:
                     urls.append(full_url)
-        # --- FINAL FIX ENDS HERE ---
+        # --- NEW FOCUSED FIX ENDS HERE ---
         
         if not urls:
-            st.error("Found links, but none of them were rider profile links. The URL structure might have changed.")
+            st.error("Found the rider list, but couldn't extract any valid rider profile links.")
             return []
 
         return urls
