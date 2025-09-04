@@ -1,146 +1,181 @@
-# First, let's bring in the tools we'll need.
-# It's like getting all your ingredients ready before you start cooking.
+# Let's start with a clean slate and build the manual data entry app.
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
-import time
 import re
+from datetime import datetime
 
-# --- Helper Functions for Scraping ---
+# --- Data Parsing Function ---
 
-def get_rider_urls(team_url, headers):
+def parse_pasted_data(raw_text, rider_name, year):
     """
-    Visits the main team page and collects the URLs for each individual rider.
+    This is the core function that takes the raw, pasted text and turns it
+    into structured data (a list of race entries).
     """
-    try:
-        response = requests.get(team_url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+    parsed_entries = []
+    lines = raw_text.strip().split('\n')
+
+    for line in lines:
+        # We only care about lines that start with a date format (e.g., "dd.mm")
+        # We explicitly ignore the multi-day tour summary lines (e.g., "dd.mm › dd.mm")
+        match = re.match(r'^(\d{2}\.\d{2})\s+', line)
         
-        urls = []
-        base_url = "https://www.procyclingstats.com/"
+        if match:
+            date_str = match.group(1)
+            # Remove the date part to process the rest of the line
+            rest_of_line = line[len(date_str):].strip()
+            tokens = rest_of_line.split()
 
-        # Instead of looking for a specific heading, we'll find all lists (<ul>)
-        # and check which one contains the rider links. This is more resilient.
-        all_lists = soup.find_all('ul')
-        rider_list_found = False
+            if not tokens:
+                continue
 
-        for list_element in all_lists:
-            # For each list, find all the links within it.
-            links_in_list = list_element.find_all('a')
-            potential_rider_links = []
+            # --- Extract Data from the tokens ---
+            result = 'N/A'
+            distance = 0.0
+            race_name_tokens = []
+
+            # The first token is almost always the result
+            result = tokens[0]
             
-            for link in links_in_list:
-                # Check if the link looks like a rider profile link.
-                if link.has_attr('href') and 'rider/' in link['href']:
-                    full_url = base_url + link['href']
-                    if full_url not in potential_rider_links:
-                        potential_rider_links.append(full_url)
-            
-            # If we found valid rider links, we assume this is the correct list.
-            if potential_rider_links:
-                urls = potential_rider_links
-                rider_list_found = True
-                break # Stop searching after finding the first valid list.
-        
-        if not rider_list_found:
-            st.error("Could not find a list containing rider links on the page. The website structure may have changed.")
-            return []
-
-        return urls
-
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to retrieve the team page. Error: {e}")
-        return []
-
-def scrape_single_rider(url, headers):
-    """
-    This function scrapes a rider's page to get their total number of race days
-    by finding the specific "Race days:" label.
-    """
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # The rider's name is usually in the main h1 tag.
-        rider_name_element = soup.find('h1')
-        if not rider_name_element:
-             return None # Can't find name, skip this rider
-        rider_name = rider_name_element.get_text(strip=True).split('»')[0].strip()
-
-        # --- NEWER, MORE ROBUST LOGIC: Find the bold tag for "Race days" ---
-        race_day_count = 0 # Default to 0
-        
-        # Find the bold (<b>) tag that contains the text "Race days:"
-        # Using a regular expression makes this more flexible.
-        race_days_tag = soup.find('b', string=re.compile(r'Race days:'))
-        
-        if race_days_tag:
-            # The number we want is the next piece of text in the HTML right after the <b> tag.
-            count_str = race_days_tag.next_sibling
-            if count_str:
+            # Find the distance: search from the end for the first number-like token
+            # This is more reliable than assuming it's always the very last token.
+            distance_found_at_index = -1
+            for i in range(len(tokens) - 1, 0, -1):
                 try:
-                    # The text might have extra spaces, so we strip them before converting to a number.
-                    race_day_count = int(count_str.strip())
-                except (ValueError, TypeError):
-                    # If it's not a number or something goes wrong, we'll just keep the count at 0.
-                    pass
-        
-        return {'Rider Name': rider_name, 'Number of Race Days': race_day_count}
+                    distance = float(tokens[i])
+                    distance_found_at_index = i
+                    break # Stop once we find it
+                except ValueError:
+                    continue # Not a number, keep searching
 
-    except requests.exceptions.RequestException:
-        # We won't show an error for every single failed URL, just skip it.
-        return None
-    except Exception:
-        # If the page structure is weird, we'll also just skip it.
-        return None
+            # The race name is everything between the result and the distance
+            if distance_found_at_index != -1:
+                race_name_tokens = tokens[1:distance_found_at_index]
+            else:
+                # If no distance was found, the rest is the race name
+                race_name_tokens = tokens[1:]
 
-# --- Main Application Logic ---
+            race_name = ' '.join(race_name_tokens)
+            
+            # Use a dictionary to keep things neat
+            parsed_entries.append({
+                'Rider': rider_name,
+                'Year': year,
+                'Date': date_str,
+                'Result': result,
+                'Race': race_name,
+                'Distance': distance
+            })
 
-st.title('ProCycling Team Data Scraper')
-st.write("Click the button to automatically fetch all rider data from the Decathlon AG2R La Mondiale Development Team page.")
+    return parsed_entries
 
-# The URL of the team we are targeting.
-team_url = "https://www.procyclingstats.com/team/decathlon-ag2r-la-mondiale-development-team-2025/overview/start"
+# --- Streamlit App UI ---
 
-if st.button('Fetch All Rider Data'):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.302_scraper.py9.110 Safari/537.36'
-    }
+st.set_page_config(layout="wide")
+st.title('ProCycling Manual Data Analyzer')
+st.write("Manually input team, rider, and season data to build your own cycling performance dashboard.")
 
-    # Step 1: Get all the individual rider URLs from the team page.
-    with st.spinner("Step 1: Finding all rider links on the team page..."):
-        rider_urls = get_rider_urls(team_url, headers)
+# Initialize session state to hold data across reruns
+if 'all_processed_data' not in st.session_state:
+    st.session_state.all_processed_data = []
 
-    if not rider_urls:
-        st.error("Halting process. Could not retrieve any rider links.")
+# --- Step 1: Team and Rider Setup ---
+st.header("Step 1: Team and Rider Setup")
+
+team_name = st.text_input("Enter Team Name:", "My Custom Team")
+num_riders = st.number_input("How many riders do you want to enter?", min_value=1, value=1, step=1)
+
+# Create a container to hold all the rider forms
+all_rider_forms = []
+
+for i in range(num_riders):
+    st.markdown("---")
+    rider_name = st.text_input(f"Rider {i+1} Name:", key=f"rider_name_{i}")
+    num_seasons = st.number_input(f"How many seasons for {rider_name or f'Rider {i+1}'}?", min_value=1, max_value=5, value=1, step=1, key=f"num_seasons_{i}")
+    
+    season_forms = []
+    for j in range(num_seasons):
+        st.markdown(f"**Season {j+1} for {rider_name or f'Rider {i+1}'}**")
+        year = st.number_input("Year:", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year, key=f"year_{i}_{j}")
+        raw_text = st.text_area("Paste raw results data here:", height=200, key=f"text_{i}_{j}", placeholder="Paste the entire results block for one season from ProCyclingStats...")
+        season_forms.append({'year': year, 'raw_text': raw_text})
+
+    all_rider_forms.append({'name': rider_name, 'seasons': season_forms})
+
+# --- Step 2: Process Data and Build Dashboard ---
+st.markdown("---")
+st.header("Step 2: Process and Analyze")
+
+if st.button("Process and Build Dashboard", type="primary"):
+    # Clear previous data before processing new data
+    st.session_state.all_processed_data = []
+    
+    with st.spinner("Parsing all pasted data..."):
+        for rider_form in all_rider_forms:
+            rider_name = rider_form['name']
+            if not rider_name:
+                st.warning("Skipping a rider because their name is empty.")
+                continue
+            
+            for season_form in rider_form['seasons']:
+                year = season_form['year']
+                raw_text = season_form['raw_text']
+                if raw_text:
+                    parsed_data = parse_pasted_data(raw_text, rider_name, year)
+                    st.session_state.all_processed_data.extend(parsed_data)
+
+    if not st.session_state.all_processed_data:
+        st.error("No data was processed. Please paste some results data into the text areas.")
     else:
-        st.success(f"Found {len(rider_urls)} riders. Now fetching their data...")
-        
-        all_rider_data = []
-        progress_bar = st.progress(0)
+        st.success("Data processed successfully! Dashboard is ready below.")
 
-        # Step 2: Loop through each URL and scrape the data.
-        for i, url in enumerate(rider_urls):
-            rider_data = scrape_single_rider(url, headers)
-            if rider_data:
-                all_rider_data.append(rider_data)
+# --- Step 3: The Dashboard (only shows if data has been processed) ---
+if st.session_state.all_processed_data:
+    st.markdown("---")
+    st.header(f"Dashboard for {team_name}")
+    
+    df = pd.DataFrame(st.session_state.all_processed_data)
+    
+    # --- Data Filtering ---
+    st.subheader("Filter and View Data")
+    all_riders = df['Rider'].unique()
+    selected_riders = st.multiselect("Select riders to view:", options=all_riders, default=list(all_riders))
+    
+    if not selected_riders:
+        st.warning("Please select at least one rider to see the analysis.")
+    else:
+        filtered_df = df[df['Rider'].isin(selected_riders)].copy()
+
+        # --- Analysis Section ---
+        st.subheader("Performance Analysis")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # 1. Race Day Comparison
+            st.markdown("#### Race Days Comparison")
+            race_days = filtered_df.groupby('Rider').size().reset_index(name='Race Days')
+            st.bar_chart(race_days, x='Rider', y='Race Days')
+
+        with col2:
+            # 2. Performance by Month
+            st.markdown("#### Average Result by Month")
             
-            # To be a good web citizen, let's wait a tiny bit between requests.
-            time.sleep(0.2) 
+            # Convert 'Result' to numeric, coercing errors (like 'DNF') to NaN
+            filtered_df['Result_Numeric'] = pd.to_numeric(filtered_df['Result'], errors='coerce')
             
-            # Update the progress bar and status text
-            progress_bar.progress((i + 1) / len(rider_urls), text=f"Scraping rider {i+1} of {len(rider_urls)}")
+            # Extract month from date string
+            filtered_df['Month'] = filtered_df['Date'].apply(lambda x: int(x.split('.')[1]))
+            
+            # Calculate average result, ignoring NaNs
+            monthly_performance = filtered_df.dropna(subset=['Result_Numeric']).groupby(['Rider', 'Month'])['Result_Numeric'].mean().reset_index()
+            
+            # Create a pivot table for easier plotting
+            pivot_df = monthly_performance.pivot(index='Month', columns='Rider', values='Result_Numeric')
+            st.line_chart(pivot_df)
+            st.caption("Lower is better. Shows the average placing for each month.")
 
-        progress_bar.empty() # Clear the progress bar
+        # --- Raw Data View ---
+        st.subheader("Processed Data Table")
+        st.dataframe(filtered_df)
 
-        # Step 3: Display the results.
-        if all_rider_data:
-            st.success('Data scraping complete!')
-            df = pd.DataFrame(all_rider_data)
-            st.dataframe(df)
-        else:
-            st.error("Could not retrieve data for any of the riders.")
+
 
