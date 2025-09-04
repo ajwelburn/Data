@@ -20,7 +20,6 @@ def get_rider_urls(team_url, headers):
         urls = []
         base_url = "https://www.procyclingstats.com/"
 
-        # --- NEW ROBUST FIX STARTS HERE ---
         # Instead of looking for a specific heading, we'll find all lists (<ul>)
         # and check which one contains the rider links. This is more resilient.
         all_lists = soup.find_all('ul')
@@ -43,7 +42,6 @@ def get_rider_urls(team_url, headers):
                 urls = potential_rider_links
                 rider_list_found = True
                 break # Stop searching after finding the first valid list.
-        # --- NEW ROBUST FIX ENDS HERE ---
         
         if not rider_list_found:
             st.error("Could not find a list containing rider links on the page. The website structure may have changed.")
@@ -57,7 +55,8 @@ def get_rider_urls(team_url, headers):
 
 def scrape_single_rider(url, headers):
     """
-    This function handles the logic for scraping one single rider page.
+    This function scrapes a rider's page and counts their single-day races
+    based on the results table.
     """
     try:
         response = requests.get(url, headers=headers)
@@ -70,20 +69,28 @@ def scrape_single_rider(url, headers):
              return None # Can't find name, skip this rider
         rider_name = rider_name_element.get_text(strip=True).split('»')[0].strip()
 
-        # The stats are in a specific div. We'll look for the "Race days" label.
-        race_days = "N/A" # Default value
-        stats_container = soup.find('div', class_='rdr-info-cont')
-        if stats_container:
-            # We look for all bold tags, as they are used as labels for stats.
-            labels = stats_container.find_all('b')
-            for label in labels:
-                if 'Race days' in label.text:
-                    # The number of race days is the text that comes right after the <b> tag.
-                    if label.next_sibling and isinstance(label.next_sibling, str):
-                        race_days = label.next_sibling.strip()
-                    break # Stop looking once we've found it.
-
-        return {'Rider Name': rider_name, 'Number of Race Days': race_days}
+        # --- NEW LOGIC TO COUNT RACE DAYS FROM THE RESULTS TABLE ---
+        race_day_count = 0
+        
+        # The race results are in a table with class 'basic'.
+        results_table = soup.find('table', class_='basic')
+        
+        if results_table:
+            # Find all the rows in the table body.
+            # Using .find('tbody') is good practice to avoid header rows.
+            table_body = results_table.find('tbody')
+            if table_body:
+                rows = table_body.find_all('tr')
+                for row in rows:
+                    # The date is typically in the first column (<td>).
+                    date_cell = row.find('td')
+                    if date_cell:
+                        date_text = date_cell.get_text(strip=True)
+                        # Count only if it's a single date (no '›') and the cell is not empty.
+                        if '›' not in date_text and date_text:
+                            race_day_count += 1
+        
+        return {'Rider Name': rider_name, 'Number of Race Days': race_day_count}
 
     except requests.exceptions.RequestException:
         # We won't show an error for every single failed URL, just skip it.
@@ -138,3 +145,4 @@ if st.button('Fetch All Rider Data'):
             st.dataframe(df)
         else:
             st.error("Could not retrieve data for any of the riders.")
+
