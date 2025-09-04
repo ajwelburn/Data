@@ -20,27 +20,31 @@ def get_rider_urls(team_url, headers):
         urls = []
         base_url = "https://www.procyclingstats.com/"
 
-        # --- FIX STARTS HERE ---
-        # The website has changed. We are now looking for a div, not a table.
-        rider_list_container = soup.find('div', class_='team_riders_list')
-        if not rider_list_container:
-            st.error("Could not find the rider list container ('div' with class 'team_riders_list') on the team page.")
+        # --- FINAL FIX STARTS HERE ---
+        # Instead of looking for a specific section, let's find ALL links on the page
+        # and filter them for the ones that point to a rider's profile.
+        # This is much more robust against layout changes.
+        all_links = soup.find_all('a')
+
+        if not all_links:
+            st.error("Could not find any links on the page.")
             return []
 
-        # Find all the links (a tags) within that container.
-        rider_links = rider_list_container.find_all('a')
-        if not rider_links:
-            st.error("Found the container, but it contains no rider links.")
-            return []
-
-        # Loop through each link to build the full URL.
-        for link in rider_links:
+        # Loop through every single link we found.
+        for link in all_links:
+            # Check if the link has an 'href' and if that 'href' contains 'rider/'.
             if link and link.has_attr('href') and 'rider/' in link['href']:
                 # The links are relative, so we need to add the base URL.
                 full_url = base_url + link['href']
-                urls.append(full_url)
-        # --- FIX ENDS HERE ---
+                # We add a check to make sure we don't add the same link twice.
+                if full_url not in urls: 
+                    urls.append(full_url)
+        # --- FINAL FIX ENDS HERE ---
         
+        if not urls:
+            st.error("Found links, but none of them were rider profile links. The URL structure might have changed.")
+            return []
+
         return urls
 
     except requests.exceptions.RequestException as e:
@@ -57,7 +61,10 @@ def scrape_single_rider(url, headers):
         soup = BeautifulSoup(response.content, 'html.parser')
 
         # The rider's name is usually in the main h1 tag.
-        rider_name = soup.find('h1').get_text(strip=True).split('»')[0].strip()
+        rider_name_element = soup.find('h1')
+        if not rider_name_element:
+             return None # Can't find name, skip this rider
+        rider_name = rider_name_element.get_text(strip=True).split('»')[0].strip()
 
         # The stats are in a specific div. We'll look for the "Race days" label.
         race_days = "N/A" # Default value
@@ -68,7 +75,8 @@ def scrape_single_rider(url, headers):
             for label in labels:
                 if 'Race days' in label.text:
                     # The number of race days is the text that comes right after the <b> tag.
-                    race_days = label.next_sibling.strip()
+                    if label.next_sibling and isinstance(label.next_sibling, str):
+                        race_days = label.next_sibling.strip()
                     break # Stop looking once we've found it.
 
         return {'Rider Name': rider_name, 'Number of Race Days': race_days}
@@ -126,4 +134,3 @@ if st.button('Fetch All Rider Data'):
             st.dataframe(df)
         else:
             st.error("Could not retrieve data for any of the riders.")
-
