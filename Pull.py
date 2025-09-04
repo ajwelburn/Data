@@ -1,3 +1,4 @@
+
 # First, let's bring in the tools we'll need.
 # It's like getting all your ingredients ready before you start cooking.
 import streamlit as st
@@ -33,10 +34,20 @@ def scrape_rider_data():
         rider_names = []
         race_days = []
 
-        # From inspecting the website, we know the rider information is in a table.
-        # We find the table's body (tbody) which contains all the rider rows.
-        # The specific table is within a div with the class 'team_riders_list'.
-        rider_table = soup.find('div', class_='team_riders_list').find('tbody')
+        # --- FIX STARTS HERE ---
+        # Instead of chaining .find() calls, we'll do it in steps to make it safer.
+        # First, find the container div for the riders list.
+        team_riders_div = soup.find('div', class_='team_riders_list')
+
+        # If we can't find that div, the website structure has likely changed.
+        if not team_riders_div:
+            st.error("Could not find the rider list container on the page. The website structure has probably changed.")
+            return None
+
+        # Now, look for the table body (tbody) inside that div.
+        rider_table = team_riders_div.find('tbody')
+        # --- FIX ENDS HERE ---
+
 
         # If we can't find the table, something is wrong.
         if not rider_table:
