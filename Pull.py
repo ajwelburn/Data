@@ -55,8 +55,8 @@ def get_rider_urls(team_url, headers):
 
 def scrape_single_rider(url, headers):
     """
-    This function scrapes a rider's page and counts their actual race days
-    by looking at each entry in the results table.
+    This function scrapes a rider's page to get their total number of race days
+    from the statistics summary box, which is much more reliable.
     """
     try:
         response = requests.get(url, headers=headers)
@@ -69,26 +69,27 @@ def scrape_single_rider(url, headers):
              return None # Can't find name, skip this rider
         rider_name = rider_name_element.get_text(strip=True).split('»')[0].strip()
 
-        # --- NEW, MORE ROBUST LOGIC FOR COUNTING RACE DAYS ---
-        race_day_count = 0
+        # --- NEW, MORE RELIABLE LOGIC: Scrape the summary box for "Race days" ---
+        race_day_count = 0 # Default to 0
         
-        # The race results are in a table with class 'basic'.
-        results_table = soup.find('table', class_='basic')
+        # Find the container for rider statistics
+        info_container = soup.find('div', class_='rdr-info-cont')
         
-        if results_table:
-            table_body = results_table.find('tbody')
-            if table_body:
-                rows = table_body.find_all('tr')
-                for row in rows:
-                    # Find the first column, which should contain the date.
-                    date_cell = row.find('td')
-                    if date_cell:
-                        date_text = date_cell.get_text(strip=True)
-                        
-                        # A valid race day is any row with a date that is NOT a date range.
-                        # This correctly counts one-day races AND individual stages.
-                        if date_text and '›' not in date_text:
-                            race_day_count += 1
+        if info_container:
+            # Find all the stat lines within the container
+            stat_lines = info_container.find_all('div')
+            for line in stat_lines:
+                line_text = line.get_text(strip=True)
+                if line_text.startswith('Race days:'):
+                    # Extract the number part and convert to an integer
+                    try:
+                        # e.g., 'Race days: 31' -> split by ':' -> ['Race days', ' 31'] -> take the second part -> strip whitespace -> '31'
+                        count_str = line_text.split(':')[1].strip()
+                        race_day_count = int(count_str)
+                        break # Found it, no need to look further
+                    except (IndexError, ValueError):
+                        # If splitting or int conversion fails, leave count as 0 and move on.
+                        pass
         
         return {'Rider Name': rider_name, 'Number of Race Days': race_day_count}
 
@@ -145,3 +146,4 @@ if st.button('Fetch All Rider Data'):
             st.dataframe(df)
         else:
             st.error("Could not retrieve data for any of the riders.")
+            
