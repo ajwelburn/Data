@@ -193,7 +193,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
 
     # Plot W' depletion curves for reference
     if "Combined" in title_prefix:
-        grayscale_colors = ['0.75', '0.6', '0.45', '0.3', '0.0']  # Lightest grey to black
+        grayscale_colors = ['0.0', '0.3', '0.45', '0.6', '0.75']  # Black to lightest grey
         for i, depletion in enumerate(range(10, 60, 10)):
             x_values = range(1, 71)
             w_prime_depleted = w_prime * (depletion / 100)
