@@ -42,8 +42,8 @@ def analyze_bouts(time_values, power_values, cp):
     """Identifies high-intensity bouts from power data based on a CP threshold."""
     threshold_factor = 1.05
     threshold_power = cp * threshold_factor
-    min_bout_duration = 2
-    gap_tolerance = 2  # Allow for short drops below the threshold
+    min_bout_duration = 3
+    gap_tolerance = 3  # Allow for short drops below the threshold
     bouts = []
     duration, avg_power, below_counter, start_time = 0, 0, 0, None
 
@@ -142,9 +142,39 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     bout_durations = bouts_df['duration']
     magnitudes = bouts_df['magnitude']
 
-    st.subheader(f"{title_prefix}Magnitude vs. Bout Duration")
-    fig1, ax1 = plt.subplots(figsize=(10, 5))
+    # Apply "Research Grade" styling ONLY for the combined chart
+    if "Combined" in title_prefix:
+        st.subheader("Combined Magnitude vs. Bout Duration (Research Grade)")
+        # Use a different aspect ratio and high resolution for publication quality
+        fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
+        
+        # Set font properties for a more formal, academic look
+        font_settings = {'fontfamily': 'serif', 'fontsize': 12, 'fontweight': 'bold'}
+        title_font_settings = {'fontfamily': 'serif', 'fontsize': 16, 'fontweight': 'bold'}
+        
+        ax1.set_xlabel('Bout Duration (s)', **font_settings)
+        ax1.set_ylabel('Magnitude (% of CP)', **font_settings)
+        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)', **title_font_settings)
 
+        # Make axis lines and ticks bolder for clarity, removing top and right spines
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax1.spines['left'].set_linewidth(1.5)
+        ax1.spines['bottom'].set_linewidth(1.5)
+        ax1.tick_params(width=1.5, labelsize=10)
+        
+        # Use a more subtle grid style
+        ax1.grid(alpha=0.3, linestyle='--')
+        
+    else:  # Keep original styling for individual file charts
+        st.subheader(f"{title_prefix}Magnitude vs. Bout Duration")
+        fig1, ax1 = plt.subplots(figsize=(10, 5))
+        ax1.set_xlabel('Bout Duration (s)')
+        ax1.set_ylabel('Magnitude (% of CP)')
+        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)')
+        ax1.grid(alpha=0.4)
+
+    # Common plotting logic for both chart styles
     ax1.scatter(bout_durations, magnitudes, c=bouts_df['color'], alpha=0.7, label='Individual Bouts')
     avg_duration = bout_durations.mean()
     avg_magnitude = magnitudes.mean()
@@ -155,15 +185,22 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         x_values = range(1, 71)
         w_prime_depleted = w_prime * (depletion / 100)
         y_values = [(((w_prime_depleted / t) + cp) / cp) * 100 for t in x_values]
-        ax1.plot(x_values, y_values, 'k:', linewidth=0.7, label=f"{depletion}% W'")
+        # Use a slightly different line style for the research plot
+        if "Combined" in title_prefix:
+            ax1.plot(x_values, y_values, 'k--', linewidth=1.0, label=f"{depletion}% W'")
+        else:
+            ax1.plot(x_values, y_values, 'k:', linewidth=0.7, label=f"{depletion}% W'")
 
-    ax1.set_xlabel('Bout Duration (s)')
-    ax1.set_ylabel('Magnitude (% of CP)')
-    ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)')
+    # Set common axis limits
     ax1.set_ylim(105, max(250, magnitudes.max() * 1.1 if not magnitudes.empty else 250))
     ax1.set_xlim(0, 70)
-    ax1.grid(alpha=0.4)
-    ax1.legend()
+    
+    # Customize legend for the research plot
+    if "Combined" in title_prefix:
+        ax1.legend(fontsize=10, frameon=False)
+    else:
+        ax1.legend()
+        
     st.pyplot(fig1)
 
 def plot_w_prime_balance(time_series, w_bal_series, w_prime):
@@ -184,16 +221,36 @@ def generate_excel_output(all_files_data, cp, w_prime):
     """Generates an Excel file with all analysis data."""
     output = io.BytesIO()
     with ExcelWriter(output, engine='openpyxl') as writer:
-        # Sheet 1: All Bouts Data
+        # Consolidate all bouts from all files into a single DataFrame
         all_bouts_df = pd.concat([f['bouts_df'] for f in all_files_data if not f['bouts_df'].empty], ignore_index=True)
-        if not all_bouts_df.empty:
-            all_bouts_df.to_excel(writer, sheet_name='All Bouts Data', index=False)
 
-        # Sheet 2: W' Depletion Curves
-        w_prime_curves = {'Time (s)': range(1, 71)}
+        # Generate the W' depletion curves data
+        w_prime_curves_data = {'Time (s)': range(1, 71)}
         for depletion in range(10, 60, 10):
-            w_prime_curves[f"{depletion}% W' Depletion (%CP)"] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
-        pd.DataFrame(w_prime_curves).to_excel(writer, sheet_name='W Prime Depletion Curves', index=False)
+            w_prime_curves_data[f"{depletion}% W' Depletion (%CP)"] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves_data['Time (s)']]
+        w_prime_curves_df = pd.DataFrame(w_prime_curves_data)
+
+        # Sheet 1: Combined Bouts and Depletion Curves
+        # Merge the bout data with the corresponding W' depletion curve values based on duration
+        if not all_bouts_df.empty:
+            # Round duration to handle any potential floating point issues and convert to int
+            all_bouts_df['duration'] = all_bouts_df['duration'].round().astype(int)
+            
+            combined_df = pd.merge(
+                all_bouts_df,
+                w_prime_curves_df,
+                left_on='duration',
+                right_on='Time (s)',
+                how='left'
+            )
+            combined_df.drop(columns=['Time (s)'], inplace=True, errors='ignore')
+            combined_df.to_excel(writer, sheet_name='Bouts vs Depletion Curves', index=False)
+        else:
+            # Create an empty sheet if there are no bouts, to maintain a consistent file structure
+            pd.DataFrame().to_excel(writer, sheet_name='Bouts vs Depletion Curves', index=False)
+
+        # Sheet 2: W' Depletion Curves (kept for reference)
+        w_prime_curves_df.to_excel(writer, sheet_name='W Prime Depletion Curves', index=False)
 
         # Sheet 3: Individual Zone Data
         all_zone_rows = []
@@ -322,5 +379,4 @@ else:
                 st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     else:
         st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
-
 
