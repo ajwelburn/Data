@@ -42,8 +42,8 @@ def analyze_bouts(time_values, power_values, cp):
     """Identifies high-intensity bouts from power data based on a CP threshold."""
     threshold_factor = 1.05
     threshold_power = cp * threshold_factor
-    min_bout_duration = 3
-    gap_tolerance = 3  # Allow for short drops below the threshold
+    min_bout_duration = 2
+    gap_tolerance = 2  # Allow for short drops below the threshold
     bouts = []
     duration, avg_power, below_counter, start_time = 0, 0, 0, None
 
