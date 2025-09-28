@@ -2,3 +2,6 @@ streamlit
 requests
 beautifulsoup4
 pandas
+openpyxl
+fitparse
+matplotlib
