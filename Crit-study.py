@@ -18,7 +18,7 @@ st.set_page_config(
 # -------------------
 @st.cache_data
 def parse_fit_file(uploaded_file):
-    """Parses an uploaded FIT file and returns a pandas DataFrame with time and power."""
+    """Parses a FIT file and returns a DataFrame with time and power."""
     uploaded_file.seek(0)
     try:
         fitfile = fitparse.FitFile(uploaded_file)
@@ -36,8 +36,7 @@ def parse_fit_file(uploaded_file):
     return df[['time', 'power']]
 
 def analyze_bouts(time_values, power_values, cp):
-    """Analyzes power data to find high-intensity bouts and returns a DataFrame."""
-    # This function remains unchanged
+    """Analyzes power data for high-intensity bouts."""
     threshold_factor = 1.05; threshold_power = cp * threshold_factor
     min_bout_duration = 3; gap_tolerance = 3
     bouts = []; duration, avg_power, below_counter, start_time = 0, 0, 0, None
@@ -68,7 +67,6 @@ def analyze_bouts(time_values, power_values, cp):
 
 def calculate_w_prime_balance(power_series, cp, w_prime, A, B):
     """Calculates the W' Balance for a given power series."""
-    # This function remains unchanged
     w_balance = w_prime; w_bal_list = []
     for p in power_series:
         if p > cp:
@@ -84,20 +82,21 @@ def calculate_w_prime_balance(power_series, cp, w_prime, A, B):
         w_bal_list.append(w_balance)
     return pd.Series(w_bal_list)
 
-def calculate_matches_and_zones(w_bal_series, w_prime, total_duration):
-    """Calculates match count and time in W'bal zones."""
-    # Match Counter Logic
+def calculate_matches_and_zones(w_bal_series, w_prime, time_series):
+    """Calculates match count, match times, and time in W'bal zones."""
+    total_duration = time_series.max()
     match_threshold = 0.15 * w_prime
     match_count = 0
+    match_times = []
     below_threshold = False
-    for val in w_bal_series:
+    for i, val in enumerate(w_bal_series):
         if val < match_threshold and not below_threshold:
             match_count += 1
+            match_times.append(time_series[i])
             below_threshold = True
         elif val >= match_threshold:
             below_threshold = False
 
-    # Zone Calculation Logic
     w_bal_percent = (w_bal_series / w_prime) * 100
     bins = [-1, 10, 15, 25, 50, 70, 101]
     labels = ['0-10%', '10-15%', '15-25%', '25-50%', '50-70%', '70-100%']
@@ -107,14 +106,13 @@ def calculate_matches_and_zones(w_bal_series, w_prime, total_duration):
         'Time (s)': zone_counts,
         'Time (%)': (zone_counts / total_duration * 100).round(2)
     })
-    return match_count, zone_data
+    return match_count, zone_data, match_times
 
 # -------------------
 # Plotting & Export Functions
 # -------------------
 def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
-    """Generates and displays the matplotlib summary plots for bouts."""
-    # This function remains unchanged
+    """Generates and displays summary plots for bouts."""
     if bouts_df.empty:
         st.warning(f"No bouts detected for {title_prefix} analysis.")
         return
@@ -127,7 +125,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
                 linewidth=1.5, label=f'Overall Average ({avg_duration:.1f}s, {avg_magnitude:.1f}%)', zorder=5)
     for depletion in range(10, 60, 10):
         y_values = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in range(1, 71)]
-        ax1.plot(range(1, 71), y_values, 'k:', linewidth=0.7, label=f'{depletion}% W\'')
+        ax1.plot(range(1, 71), y_values, 'k:', linewidth=0.7, label=f"{depletion}% W'")
     ax1.set_xlabel('Bout Duration (s)'); ax1.set_ylabel('Magnitude (% of CP)')
     ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)')
     ax1.set_ylim(105, max(250, magnitudes.max() * 1.1 if not magnitudes.empty else 250))
@@ -141,12 +139,25 @@ def plot_w_prime_balance(time_series, w_bal_series, w_prime):
     ax.plot(time_series, w_bal_percent, color='green', linewidth=1.5)
     ax.fill_between(time_series, 0, w_bal_percent, color='green', alpha=0.2)
     ax.set_xlabel("Time (s)"); ax.set_ylabel("W' Balance (%)")
+    ax.set_title("W' Balance Over Time")
     ax.set_ylim(0, 105); ax.set_xlim(0, time_series.max())
     ax.grid(alpha=0.3)
     return fig
 
+def plot_matches_burned(match_times, total_duration):
+    """Plots a timeline of when matches were burned."""
+    fig, ax = plt.subplots(figsize=(10, 1.5))
+    if match_times:
+        ax.vlines(match_times, ymin=0, ymax=1, color='red', linestyle='--', linewidth=1.5, label='Match Burned')
+    ax.set_xlim(0, total_duration)
+    ax.set_ylim(0,1)
+    ax.yaxis.set_visible(False)
+    ax.set_xlabel("Time (s)")
+    ax.set_title("Match Burn Events")
+    return fig
+
 def generate_excel_output(bouts_df, cp, w_prime, all_files_data):
-    """Creates an Excel file with all analysis data."""
+    """Creates a comprehensive Excel file with all analysis data."""
     output = io.BytesIO()
     with ExcelWriter(output, engine='openpyxl') as writer:
         # --- Bouts & Summary ---
@@ -156,22 +167,28 @@ def generate_excel_output(bouts_df, cp, w_prime, all_files_data):
             w_prime_curves[f"{depletion}% W' Depletion (%CP)"] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
         pd.DataFrame(w_prime_curves).to_excel(writer, sheet_name='W Prime Depletion Curves', index=False)
         
-        # --- Zones Sheets ---
-        total_zone_seconds = None
-        total_duration_all_files = 0
+        # --- Consolidated Individual Zones ---
+        individual_zones_list = []
         for file_data in all_files_data:
-            file_data['zone_data'].to_excel(writer, sheet_name=f"Zones - {file_data['name'][:30]}")
-            if total_zone_seconds is None:
-                total_zone_seconds = file_data['zone_data']['Time (s)']
-            else:
-                total_zone_seconds += file_data['zone_data']['Time (s)']
-            total_duration_all_files += file_data['duration']
+            zone_df = file_data['zone_data'].copy()
+            zone_df['File Name'] = file_data['name']
+            individual_zones_list.append(zone_df)
         
-        combined_zones = pd.DataFrame({
-            'Time (s)': total_zone_seconds,
-            'Time (%)': (total_zone_seconds / total_duration_all_files * 100).round(2)
-        })
-        combined_zones.to_excel(writer, sheet_name='Combined Zones')
+        if individual_zones_list:
+            consolidated_zones_df = pd.concat(individual_zones_list)
+            consolidated_zones_df = consolidated_zones_df.reset_index().rename(columns={'index': 'Zone'})
+            consolidated_zones_df = consolidated_zones_df[['File Name', 'Zone', 'Time (s)', 'Time (%)']]
+            consolidated_zones_df.to_excel(writer, sheet_name='Individual Zone Data', index=False)
+
+        # --- Combined Zones ---
+        total_zone_seconds = sum(f['zone_data']['Time (s)'] for f in all_files_data)
+        total_duration_all_files = sum(f['duration'] for f in all_files_data)
+        if total_duration_all_files > 0:
+            combined_zones = pd.DataFrame({
+                'Time (s)': total_zone_seconds,
+                'Time (%)': (total_zone_seconds / total_duration_all_files * 100).round(2)
+            })
+            combined_zones.to_excel(writer, sheet_name='Combined Zones')
 
         # --- Summary Sheet ---
         if not bouts_df.empty:
@@ -190,7 +207,7 @@ st.title("🚴 Multi-File Cycling Bout & W'bal Analysis Tool")
 
 with st.sidebar:
     st.header("⚙️ User Inputs")
-    uploaded_files = st.file_uploader("1. Upload your FIT file(s)", type=["fit"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("1. Upload FIT file(s)", type=["fit"], accept_multiple_files=True)
     st.markdown("---")
     st.subheader("2. Set Parameters")
     cp = st.number_input("Critical Power (CP) in Watts", 100, 600, 250, 1)
@@ -199,7 +216,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("W'bal Model Parameters (Tau)")
     tau_A = st.number_input("Parameter A", value=350.0, step=10.0, format="%.1f")
-    tau_B = st.number_input("Parameter B (must be negative)", value=-0.3, step=0.01, format="%.2f")
+    tau_B = st.number_input("Parameter B (negative)", value=-0.3, step=0.01, format="%.2f")
     st.markdown("---")
     analyze_button = st.button("Analyze Files", type="primary", use_container_width=True)
 
@@ -208,7 +225,7 @@ if not uploaded_files:
 else:
     if analyze_button:
         with st.spinner('Analyzing files... This may take a moment.'):
-            all_files_data = [] # To store detailed results for combined analysis
+            all_files_data = []
             
             st.header("Individual File Analysis")
             for file in uploaded_files:
@@ -218,18 +235,15 @@ else:
                         st.error(f"Could not process {file.name} or no power data found.")
                         continue
 
-                    # --- Run All Analyses ---
                     bouts_df = analyze_bouts(data_df['time'], data_df['power'], cp)
                     w_bal_series = calculate_w_prime_balance(data_df['power'], cp, w_prime, tau_A, tau_B)
-                    total_duration = data_df['time'].max()
-                    match_count, zone_data = calculate_matches_and_zones(w_bal_series, w_prime, total_duration)
+                    match_count, zone_data, match_times = calculate_matches_and_zones(w_bal_series, w_prime, data_df['time'])
 
                     all_files_data.append({
-                        'name': file.name, 'bouts_df': bouts_df, 'duration': total_duration,
-                        'match_count': match_count, 'zone_data': zone_data
+                        'name': file.name, 'bouts_df': bouts_df, 'duration': data_df['time'].max(),
+                        'match_count': match_count, 'zone_data': zone_data, 'match_times': match_times
                     })
 
-                    # --- Display Bout Analysis ---
                     st.subheader("Bout Analysis Results")
                     if not bouts_df.empty:
                         col1, col2, col3 = st.columns(3)
@@ -240,47 +254,44 @@ else:
                         st.write("No high-intensity bouts detected.")
                     
                     st.markdown("---")
-
-                    # --- Display W'bal Analysis (Side-by-Side) ---
                     st.subheader("W' Balance (W'bal) Analysis")
-                    col_wbal_1, col_wbal_2 = st.columns([2, 1]) # Make graph column wider
+                    col_wbal_1, col_wbal_2 = st.columns([2, 1])
                     with col_wbal_1:
-                        fig = plot_w_prime_balance(data_df['time'], w_bal_series, w_prime)
-                        st.pyplot(fig)
+                        fig_wbal = plot_w_prime_balance(data_df['time'], w_bal_series, w_prime)
+                        st.pyplot(fig_wbal)
+                        fig_matches = plot_matches_burned(match_times, data_df['time'].max())
+                        st.pyplot(fig_matches)
                     with col_wbal_2:
                         st.metric("Matches Burned (<15% W'bal) 🔥", match_count)
                         st.dataframe(zone_data)
                         st.bar_chart(zone_data['Time (%)'])
 
-            # --- Combined Analysis Section ---
             if all_files_data:
                 st.markdown("---")
                 st.header("📊 Combined Analysis for All Files")
                 
-                # Combined Bout Analysis
                 combined_bouts_df = pd.concat([f['bouts_df'] for f in all_files_data], ignore_index=True)
                 if not combined_bouts_df.empty:
                     st.subheader("Combined Bout Metrics")
                     total_matches = sum(f['match_count'] for f in all_files_data)
-                    col1_c, col2_c, col3_c, col4_c = st.columns(4)
-                    col1_c.metric("Total Bouts", f"{len(combined_bouts_df)}")
-                    col2_c.metric("Overall Avg. Magnitude", f"{combined_bouts_df['magnitude'].mean():.1f}% CP")
-                    col3_c.metric("Overall Avg. Duration", f"{combined_bouts_df['duration'].mean():.1f} s")
-                    col4_c.metric("Total Matches Burned 🔥", total_matches)
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Total Bouts", f"{len(combined_bouts_df)}")
+                    c2.metric("Overall Avg. Magnitude", f"{combined_bouts_df['magnitude'].mean():.1f}% CP")
+                    c3.metric("Overall Avg. Duration", f"{combined_bouts_df['duration'].mean():.1f} s")
+                    c4.metric("Total Matches Burned 🔥", total_matches)
                     create_summary_plots(combined_bouts_df, cp, w_prime, title_prefix="Combined ")
 
-                # Combined Zone Analysis
                 st.subheader("Combined W'bal Time in Zones")
                 total_zone_seconds = sum(f['zone_data']['Time (s)'] for f in all_files_data)
                 total_duration_all = sum(f['duration'] for f in all_files_data)
-                combined_zones_df = pd.DataFrame({
-                    'Total Time (s)': total_zone_seconds,
-                    'Total Time (%)': (total_zone_seconds / total_duration_all * 100).round(2)
-                })
-                st.dataframe(combined_zones_df)
-                st.bar_chart(combined_zones_df['Total Time (%)'])
+                if total_duration_all > 0:
+                    combined_zones_df = pd.DataFrame({
+                        'Total Time (s)': total_zone_seconds,
+                        'Total Time (%)': (total_zone_seconds / total_duration_all * 100).round(2)
+                    })
+                    st.dataframe(combined_zones_df)
+                    st.bar_chart(combined_zones_df['Total Time (%)'])
 
-                # --- Excel Download Button ---
                 st.markdown("---")
                 st.header("⬇️ Download All Data")
                 excel_data = generate_excel_output(combined_bouts_df, cp, w_prime, all_files_data)
