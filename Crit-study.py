@@ -9,9 +9,10 @@ from pandas import ExcelWriter
 st.set_page_config(layout="wide")
 
 # -------------------
-# Data Processing Functions (from previous script, no changes needed)
+# Data Processing Functions
 # -------------------
 def parse_fit_file(uploaded_file):
+    """Parses an uploaded FIT file and returns a pandas DataFrame with time and power."""
     uploaded_file.seek(0)
     try:
         fitfile = fitparse.FitFile(uploaded_file)
@@ -29,10 +30,11 @@ def parse_fit_file(uploaded_file):
     return df[['time', 'power']]
 
 def analyze_bouts(time_values, power_values, cp):
+    """Analyzes power data to find high-intensity bouts and returns a DataFrame."""
     threshold_factor = 1.05
     threshold_power = cp * threshold_factor
-    min_bout_duration = 3
-    gap_tolerance = 3
+    min_bout_duration = 2
+    gap_tolerance = 2
     
     bouts = []
     duration, avg_power, below_counter, start_time = 0, 0, 0, None
@@ -66,10 +68,10 @@ def analyze_bouts(time_values, power_values, cp):
     return bouts_df
 
 # -------------------
-# Plotting Function
+# Plotting Function (MODIFIED)
 # -------------------
 def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
-    """Generates and displays the matplotlib summary plots."""
+    """Generates and displays the matplotlib summary plots, now including the average point."""
     if bouts_df.empty:
         st.warning(f"No bouts detected for {title_prefix} analysis.")
         return
@@ -82,8 +84,16 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     # --- Graph 1: Magnitude vs Bout Duration ---
     st.subheader(f"{title_prefix}Magnitude vs. Bout Duration")
     fig1, ax1 = plt.subplots(figsize=(10, 5))
-    ax1.scatter(bout_durations, magnitudes, c=colors, alpha=0.7)
+    ax1.scatter(bout_durations, magnitudes, c=colors, alpha=0.7, label='Individual Bouts')
     
+    # NEW: Calculate and plot the average point
+    avg_duration = bout_durations.mean()
+    avg_magnitude = magnitudes.mean()
+    ax1.scatter(avg_duration, avg_magnitude, 
+                color='black', marker='X', s=200, edgecolor='white', 
+                linewidth=1.5, label=f'Overall Average ({avg_duration:.1f}s, {avg_magnitude:.1f}%)', zorder=5)
+
+    # Plot W' depletion lines
     for depletion in range(10, 60, 10):
         y_values = [( (w_prime * (depletion / 100) / t) + cp ) / cp * 100 for t in range(1, 71)]
         ax1.plot(range(1, 71), y_values, 'k:', linewidth=0.7, label=f'{depletion}% W\'')
@@ -108,23 +118,36 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         st.pyplot(fig3)
 
 # -------------------
-# Excel Export Function
+# Excel Export Function (MODIFIED)
 # -------------------
 def generate_excel_output(bouts_df, cp, w_prime):
-    """Creates an Excel file in memory with bout data and W' curves."""
-    # 1. Create DataFrame for W' depletion curves
-    w_prime_curves = {'Time (s)': range(1, 71)}
-    for depletion in range(10, 60, 10):
-        col_name = f"{depletion}% W' Depletion (%CP)"
-        w_prime_curves[col_name] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
-    w_prime_df = pd.DataFrame(w_prime_curves)
-
-    # 2. Write DataFrames to an in-memory Excel file
+    """Creates an Excel file in memory with bout data, W' curves, and summary stats."""
     output = io.BytesIO()
     with ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: Raw data for all bouts
         bouts_df.to_excel(writer, sheet_name='All Bouts Data', index=False)
+
+        # Sheet 2: W' depletion curves data
+        w_prime_curves = {'Time (s)': range(1, 71)}
+        for depletion in range(10, 60, 10):
+            col_name = f"{depletion}% W' Depletion (%CP)"
+            w_prime_curves[col_name] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
+        w_prime_df = pd.DataFrame(w_prime_curves)
         w_prime_df.to_excel(writer, sheet_name='W Prime Depletion Curves', index=False)
-    
+        
+        # NEW: Sheet 3: Summary Statistics
+        if not bouts_df.empty:
+            summary_data = {
+                'Metric': ['Total Efforts', 'Average Magnitude (% of CP)', 'Average Duration (s)'],
+                'Value': [
+                    len(bouts_df),
+                    bouts_df['magnitude'].mean(),
+                    bouts_df['duration'].mean()
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, sheet_name='Summary Stats', index=False)
+            
     return output.getvalue()
 
 # -------------------
@@ -135,7 +158,6 @@ st.write("Upload one or more FIT files to analyze high-intensity efforts individ
 
 with st.sidebar:
     st.header("⚙️ User Inputs")
-    # UPDATED: Accept multiple files
     uploaded_files = st.file_uploader("Upload your FIT file(s)", type=["fit"], accept_multiple_files=True)
     cp = st.number_input("Enter your Critical Power (CP) in Watts", 100, 600, 250, 1)
     w_prime_kj = st.number_input("Enter your W' (W prime) in kJ", 5.0, 50.0, 20.0, 0.5)
@@ -143,7 +165,7 @@ with st.sidebar:
 
 # --- Main App Logic ---
 if uploaded_files:
-    all_bouts = []
+    all_bouts_list = []
     
     st.header("Individual File Analysis")
     for file in uploaded_files:
@@ -161,9 +183,8 @@ if uploaded_files:
                     col2.metric("Avg. Magnitude", f"{avg_mag:.1f}% of CP")
                     col3.metric("Avg. Duration", f"{avg_dur:.1f} s")
                     
-                    # Store results for combined analysis
-                    bouts_df['source_file'] = file.name # Add filename for tracking
-                    all_bouts.append(bouts_df)
+                    bouts_df['source_file'] = file.name
+                    all_bouts_list.append(bouts_df)
                 else:
                     st.write("No high-intensity bouts detected in this file.")
             else:
@@ -172,19 +193,17 @@ if uploaded_files:
     st.markdown("---")
     
     # --- Combined Analysis Section ---
-    if all_bouts:
+    if all_bouts_list:
         st.header("📊 Combined Analysis for All Files")
-        combined_bouts_df = pd.concat(all_bouts, ignore_index=True)
+        combined_bouts_df = pd.concat(all_bouts_list, ignore_index=True)
 
-        # Display combined metrics
         avg_mag_comb = combined_bouts_df['magnitude'].mean()
         avg_dur_comb = combined_bouts_df['duration'].mean()
         col1_c, col2_c, col3_c = st.columns(3)
         col1_c.metric("Total Efforts (All Files)", f"{len(combined_bouts_df)}")
         col2_c.metric("Overall Avg. Magnitude", f"{avg_mag_comb:.1f}% of CP")
-        col3_c.metric("Overall Avg. Duration", f"{avg_dur_comb:.1f} s")
+        col2_c.metric("Overall Avg. Duration", f"{avg_dur_comb:.1f} s")
         
-        # Display combined plots
         create_summary_plots(combined_bouts_df, cp, w_prime, title_prefix="Combined ")
 
         # --- Excel Download Button ---
