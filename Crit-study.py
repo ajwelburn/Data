@@ -192,14 +192,18 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     ax1.scatter(avg_duration, avg_magnitude, color='black', marker='X', s=200, edgecolor='white', linewidth=1.5, label=f'Overall Average ({avg_duration:.0f}s, {avg_magnitude:.0f}%)', zorder=5)
 
     # Plot W' depletion curves for reference
-    for depletion in range(10, 60, 10):
-        x_values = range(1, 71)
-        w_prime_depleted = w_prime * (depletion / 100)
-        y_values = [(((w_prime_depleted / t) + cp) / cp) * 100 for t in x_values]
-        
-        if "Combined" in title_prefix:
-            ax1.plot(x_values, y_values, 'k--', linewidth=1.0, label=f"{depletion}% W'")
-        else:
+    if "Combined" in title_prefix:
+        grayscale_colors = ['0.75', '0.6', '0.45', '0.3', '0.0']  # Lightest grey to black
+        for i, depletion in enumerate(range(10, 60, 10)):
+            x_values = range(1, 71)
+            w_prime_depleted = w_prime * (depletion / 100)
+            y_values = [(((w_prime_depleted / t) + cp) / cp) * 100 for t in x_values]
+            ax1.plot(x_values, y_values, color=grayscale_colors[i], linestyle='--', linewidth=1.2, label=f"{depletion}% W'")
+    else:
+        for depletion in range(10, 60, 10):
+            x_values = range(1, 71)
+            w_prime_depleted = w_prime * (depletion / 100)
+            y_values = [(((w_prime_depleted / t) + cp) / cp) * 100 for t in x_values]
             ax1.plot(x_values, y_values, 'k:', linewidth=0.7, label=f"{depletion}% W'")
 
     # Set common axis limits
