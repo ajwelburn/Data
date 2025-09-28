@@ -1,19 +1,22 @@
 import streamlit as st
-import fitparse
 import pandas as pd
+import fitparse
 import matplotlib.pyplot as plt
 import io
 import math
 from pandas import ExcelWriter
 
-# Set page configuration to wide mode for better layout
-st.set_page_config(layout="wide")
+# --- App Configuration ---
+st.set_page_config(
+    page_title="Analyse | Cycling Tool",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # -------------------
 # Data Processing & Analysis Functions
-# (These functions remain unchanged)
 # -------------------
-@st.cache_data # Add caching to speed up re-runs with the same file
+@st.cache_data
 def parse_fit_file(uploaded_file):
     """Parses an uploaded FIT file and returns a pandas DataFrame with time and power."""
     uploaded_file.seek(0)
@@ -24,7 +27,6 @@ def parse_fit_file(uploaded_file):
             if (data := record.get_values()) and 'power' in data and data['power'] is not None
         ]
     except Exception as e:
-        # Cannot use st.error inside a cached function, so we return the error
         return f"Error parsing {uploaded_file.name}: {e}"
 
     if not records: return None
@@ -35,12 +37,10 @@ def parse_fit_file(uploaded_file):
 
 def analyze_bouts(time_values, power_values, cp):
     """Analyzes power data to find high-intensity bouts and returns a DataFrame."""
-    threshold_factor = 1.05
-    threshold_power = cp * threshold_factor
+    # This function remains unchanged
+    threshold_factor = 1.05; threshold_power = cp * threshold_factor
     min_bout_duration = 3; gap_tolerance = 3
-    bouts = []
-    duration, avg_power, below_counter, start_time = 0, 0, 0, None
-
+    bouts = []; duration, avg_power, below_counter, start_time = 0, 0, 0, None
     for t, p in zip(time_values, power_values):
         if p > threshold_power:
             if duration == 0: start_time = t
@@ -68,8 +68,8 @@ def analyze_bouts(time_values, power_values, cp):
 
 def calculate_w_prime_balance(power_series, cp, w_prime, A, B):
     """Calculates the W' Balance for a given power series."""
-    w_balance = w_prime
-    w_bal_list = []
+    # This function remains unchanged
+    w_balance = w_prime; w_bal_list = []
     for p in power_series:
         if p > cp:
             w_balance -= (p - cp)
@@ -84,20 +84,44 @@ def calculate_w_prime_balance(power_series, cp, w_prime, A, B):
         w_bal_list.append(w_balance)
     return pd.Series(w_bal_list)
 
+def calculate_matches_and_zones(w_bal_series, w_prime, total_duration):
+    """Calculates match count and time in W'bal zones."""
+    # Match Counter Logic
+    match_threshold = 0.15 * w_prime
+    match_count = 0
+    below_threshold = False
+    for val in w_bal_series:
+        if val < match_threshold and not below_threshold:
+            match_count += 1
+            below_threshold = True
+        elif val >= match_threshold:
+            below_threshold = False
+
+    # Zone Calculation Logic
+    w_bal_percent = (w_bal_series / w_prime) * 100
+    bins = [-1, 10, 15, 25, 50, 70, 101]
+    labels = ['0-10%', '10-15%', '15-25%', '25-50%', '50-70%', '70-100%']
+    zone_counts = pd.cut(w_bal_percent, bins=bins, labels=labels, right=False).value_counts().sort_index()
+    
+    zone_data = pd.DataFrame({
+        'Time (s)': zone_counts,
+        'Time (%)': (zone_counts / total_duration * 100).round(2)
+    })
+    return match_count, zone_data
+
 # -------------------
 # Plotting & Export Functions
-# (These functions remain unchanged)
 # -------------------
 def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     """Generates and displays the matplotlib summary plots for bouts."""
+    # This function remains unchanged
     if bouts_df.empty:
         st.warning(f"No bouts detected for {title_prefix} analysis.")
         return
     bout_durations = bouts_df['duration']; magnitudes = bouts_df['magnitude']
-    colors = bouts_df['color']; bout_times = bouts_df['start_time']
     st.subheader(f"{title_prefix}Magnitude vs. Bout Duration")
     fig1, ax1 = plt.subplots(figsize=(10, 5))
-    ax1.scatter(bout_durations, magnitudes, c=colors, alpha=0.7, label='Individual Bouts')
+    ax1.scatter(bout_durations, magnitudes, c=bouts_df['color'], alpha=0.7, label='Individual Bouts')
     avg_duration = bout_durations.mean(); avg_magnitude = magnitudes.mean()
     ax1.scatter(avg_duration, avg_magnitude, color='black', marker='X', s=200, edgecolor='white',
                 linewidth=1.5, label=f'Overall Average ({avg_duration:.1f}s, {avg_magnitude:.1f}%)', zorder=5)
@@ -110,35 +134,53 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     ax1.set_xlim(0, 70); ax1.grid(alpha=0.4); ax1.legend()
     st.pyplot(fig1)
 
-def plot_w_prime_balance(time_series, w_bal_series, w_prime, file_name):
+def plot_w_prime_balance(time_series, w_bal_series, w_prime):
     """Plots the W' Balance as a percentage over time."""
-    st.subheader(f"⚡ W' Balance (W'bal) Model for {file_name}")
     w_bal_percent = (w_bal_series / w_prime) * 100
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(time_series, w_bal_percent, color='green', label="W' Balance")
-    ax.fill_between(time_series, w_bal_percent, 100, color='red', alpha=0.1, label="W' Expended")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(time_series, w_bal_percent, color='green', linewidth=1.5)
     ax.fill_between(time_series, 0, w_bal_percent, color='green', alpha=0.2)
     ax.set_xlabel("Time (s)"); ax.set_ylabel("W' Balance (%)")
-    ax.set_title(f"W' Balance Over Time for {file_name}")
     ax.set_ylim(0, 105); ax.set_xlim(0, time_series.max())
-    ax.axhline(0, color='r', linestyle='--', linewidth=1)
-    ax.axhline(100, color='g', linestyle='--', linewidth=1)
-    ax.grid(alpha=0.4); st.pyplot(fig)
+    ax.grid(alpha=0.3)
+    return fig
 
-def generate_excel_output(bouts_df, cp, w_prime):
-    """Creates an Excel file in memory."""
+def generate_excel_output(bouts_df, cp, w_prime, all_files_data):
+    """Creates an Excel file with all analysis data."""
     output = io.BytesIO()
     with ExcelWriter(output, engine='openpyxl') as writer:
+        # --- Bouts & Summary ---
         bouts_df.to_excel(writer, sheet_name='All Bouts Data', index=False)
         w_prime_curves = {'Time (s)': range(1, 71)}
         for depletion in range(10, 60, 10):
-            col_name = f"{depletion}% W' Depletion (%CP)"
-            w_prime_curves[col_name] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
+            w_prime_curves[f"{depletion}% W' Depletion (%CP)"] = [((w_prime * (depletion / 100) / t) + cp) / cp * 100 for t in w_prime_curves['Time (s)']]
         pd.DataFrame(w_prime_curves).to_excel(writer, sheet_name='W Prime Depletion Curves', index=False)
+        
+        # --- Zones Sheets ---
+        total_zone_seconds = None
+        total_duration_all_files = 0
+        for file_data in all_files_data:
+            file_data['zone_data'].to_excel(writer, sheet_name=f"Zones - {file_data['name'][:30]}")
+            if total_zone_seconds is None:
+                total_zone_seconds = file_data['zone_data']['Time (s)']
+            else:
+                total_zone_seconds += file_data['zone_data']['Time (s)']
+            total_duration_all_files += file_data['duration']
+        
+        combined_zones = pd.DataFrame({
+            'Time (s)': total_zone_seconds,
+            'Time (%)': (total_zone_seconds / total_duration_all_files * 100).round(2)
+        })
+        combined_zones.to_excel(writer, sheet_name='Combined Zones')
+
+        # --- Summary Sheet ---
         if not bouts_df.empty:
-            summary_data = {'Metric': ['Total Efforts', 'Average Magnitude (% of CP)', 'Average Duration (s)'],
-                            'Value': [len(bouts_df), bouts_df['magnitude'].mean(), bouts_df['duration'].mean()]}
+            summary_data = {
+                'Metric': ['Total Efforts', 'Average Magnitude (% of CP)', 'Average Duration (s)', 'Total Matches Burned (<15%)'],
+                'Value': [len(bouts_df), bouts_df['magnitude'].mean(), bouts_df['duration'].mean(), sum(f['match_count'] for f in all_files_data)]
+            }
             pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary Stats', index=False)
+            
     return output.getvalue()
 
 # -------------------
@@ -156,74 +198,97 @@ with st.sidebar:
     w_prime = w_prime_kj * 1000
     st.markdown("---")
     st.subheader("W'bal Model Parameters (Tau)")
-    st.info("These values control the rate of W' recovery.")
     tau_A = st.number_input("Parameter A", value=350.0, step=10.0, format="%.1f")
     tau_B = st.number_input("Parameter B (must be negative)", value=-0.3, step=0.01, format="%.2f")
     st.markdown("---")
-    # NEW: The Analyze button that triggers the main logic
     analyze_button = st.button("Analyze Files", type="primary", use_container_width=True)
 
-# Main panel logic
 if not uploaded_files:
-    st.info("Upload one or more FIT files using the sidebar to begin.")
+    st.info("Upload one or more FIT files and click 'Analyze Files' to begin.")
 else:
-    # This block now only runs when the button is clicked
     if analyze_button:
         with st.spinner('Analyzing files... This may take a moment.'):
-            all_bouts_list = []
+            all_files_data = [] # To store detailed results for combined analysis
+            
             st.header("Individual File Analysis")
             for file in uploaded_files:
                 with st.expander(f"▶️ Analysis for: **{file.name}**", expanded=True):
-                    # Use a copy of the file object for caching
-                    file_copy = io.BytesIO(file.getvalue())
-                    data_df = parse_fit_file(file_copy)
-                    
-                    if isinstance(data_df, str): # Check if parsing returned an error message
-                        st.error(data_df)
-                        continue
-                    if data_df is None or data_df.empty:
-                        st.write("Could not process this file or no power data found.")
+                    data_df = parse_fit_file(io.BytesIO(file.getvalue()))
+                    if not isinstance(data_df, pd.DataFrame) or data_df.empty:
+                        st.error(f"Could not process {file.name} or no power data found.")
                         continue
 
-                    # --- Bout Analysis ---
-                    st.subheader("Bout Analysis Results")
+                    # --- Run All Analyses ---
                     bouts_df = analyze_bouts(data_df['time'], data_df['power'], cp)
-                    if not bouts_df.empty:
-                        avg_mag = bouts_df['magnitude'].mean(); avg_dur = bouts_df['duration'].mean()
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Efforts", f"{len(bouts_df)}")
-                        col2.metric("Avg. Magnitude", f"{avg_mag:.1f}% of CP")
-                        col3.metric("Avg. Duration", f"{avg_dur:.1f} s")
-                        bouts_df['source_file'] = file.name
-                        all_bouts_list.append(bouts_df)
-                    else:
-                        st.write("No high-intensity bouts detected in this file.")
-                    
-                    # --- W'bal Model ---
-                    st.markdown("---")
                     w_bal_series = calculate_w_prime_balance(data_df['power'], cp, w_prime, tau_A, tau_B)
-                    plot_w_prime_balance(data_df['time'], w_bal_series, w_prime, file.name)
-            
+                    total_duration = data_df['time'].max()
+                    match_count, zone_data = calculate_matches_and_zones(w_bal_series, w_prime, total_duration)
+
+                    all_files_data.append({
+                        'name': file.name, 'bouts_df': bouts_df, 'duration': total_duration,
+                        'match_count': match_count, 'zone_data': zone_data
+                    })
+
+                    # --- Display Bout Analysis ---
+                    st.subheader("Bout Analysis Results")
+                    if not bouts_df.empty:
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Total Bouts", f"{len(bouts_df)}")
+                        col2.metric("Avg. Magnitude", f"{bouts_df['magnitude'].mean():.1f}% CP")
+                        col3.metric("Avg. Duration", f"{bouts_df['duration'].mean():.1f} s")
+                    else:
+                        st.write("No high-intensity bouts detected.")
+                    
+                    st.markdown("---")
+
+                    # --- Display W'bal Analysis (Side-by-Side) ---
+                    st.subheader("W' Balance (W'bal) Analysis")
+                    col_wbal_1, col_wbal_2 = st.columns([2, 1]) # Make graph column wider
+                    with col_wbal_1:
+                        fig = plot_w_prime_balance(data_df['time'], w_bal_series, w_prime)
+                        st.pyplot(fig)
+                    with col_wbal_2:
+                        st.metric("Matches Burned (<15% W'bal) 🔥", match_count)
+                        st.dataframe(zone_data)
+                        st.bar_chart(zone_data['Time (%)'])
+
             # --- Combined Analysis Section ---
-            if all_bouts_list:
+            if all_files_data:
                 st.markdown("---")
-                st.header("📊 Combined Bout Analysis for All Files")
-                combined_bouts_df = pd.concat(all_bouts_list, ignore_index=True)
-                avg_mag_comb = combined_bouts_df['magnitude'].mean()
-                avg_dur_comb = combined_bouts_df['duration'].mean()
-                col1_c, col2_c, col3_c = st.columns(3)
-                col1_c.metric("Total Efforts (All Files)", f"{len(combined_bouts_df)}")
-                col2_c.metric("Overall Avg. Magnitude", f"{avg_mag_comb:.1f}% of CP")
-                col2_c.metric("Overall Avg. Duration", f"{avg_dur_comb:.1f} s")
-                create_summary_plots(combined_bouts_df, cp, w_prime, title_prefix="Combined ")
+                st.header("📊 Combined Analysis for All Files")
                 
+                # Combined Bout Analysis
+                combined_bouts_df = pd.concat([f['bouts_df'] for f in all_files_data], ignore_index=True)
+                if not combined_bouts_df.empty:
+                    st.subheader("Combined Bout Metrics")
+                    total_matches = sum(f['match_count'] for f in all_files_data)
+                    col1_c, col2_c, col3_c, col4_c = st.columns(4)
+                    col1_c.metric("Total Bouts", f"{len(combined_bouts_df)}")
+                    col2_c.metric("Overall Avg. Magnitude", f"{combined_bouts_df['magnitude'].mean():.1f}% CP")
+                    col3_c.metric("Overall Avg. Duration", f"{combined_bouts_df['duration'].mean():.1f} s")
+                    col4_c.metric("Total Matches Burned 🔥", total_matches)
+                    create_summary_plots(combined_bouts_df, cp, w_prime, title_prefix="Combined ")
+
+                # Combined Zone Analysis
+                st.subheader("Combined W'bal Time in Zones")
+                total_zone_seconds = sum(f['zone_data']['Time (s)'] for f in all_files_data)
+                total_duration_all = sum(f['duration'] for f in all_files_data)
+                combined_zones_df = pd.DataFrame({
+                    'Total Time (s)': total_zone_seconds,
+                    'Total Time (%)': (total_zone_seconds / total_duration_all * 100).round(2)
+                })
+                st.dataframe(combined_zones_df)
+                st.bar_chart(combined_zones_df['Total Time (%)'])
+
                 # --- Excel Download Button ---
                 st.markdown("---")
-                st.header("⬇️ Download Bout Data")
-                excel_data = generate_excel_output(combined_bouts_df, cp, w_prime)
-                st.download_button(label="📥 Download Bout Analysis as Excel File", data=excel_data,
-                                  file_name=f'combined_bout_analysis_{cp}W_CP.xlsx',
-                                  mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                st.header("⬇️ Download All Data")
+                excel_data = generate_excel_output(combined_bouts_df, cp, w_prime, all_files_data)
+                st.download_button(
+                    label="📥 Download Full Analysis as Excel File",
+                    data=excel_data,
+                    file_name=f'full_analysis_{cp}W_CP.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
     else:
-        # This message shows after files are uploaded but before the button is clicked
-        st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters in the sidebar and click 'Analyze Files' to process.")
+        st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
