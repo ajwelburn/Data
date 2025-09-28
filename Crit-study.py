@@ -40,7 +40,7 @@ def parse_fit_file(uploaded_file):
 
 def analyze_bouts(time_values, power_values, cp):
     """Identifies high-intensity bouts from power data based on a CP threshold."""
-    threshold_factor = 1.05
+    threshold_factor = 1.00  # Set threshold to 100% of CP
     threshold_power = cp * threshold_factor
     min_bout_duration = 3
     gap_tolerance = 3  # Allow for short drops below the threshold
@@ -154,7 +154,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         
         ax1.set_xlabel('Bout Duration (s)', **font_settings)
         ax1.set_ylabel('Magnitude (% of CP)', **font_settings)
-        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)', **title_font_settings)
+        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>100% CP)', **title_font_settings)
 
         # Make axis lines and ticks bolder for clarity, removing top and right spines
         ax1.spines['top'].set_visible(False)
@@ -171,7 +171,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         fig1, ax1 = plt.subplots(figsize=(10, 5))
         ax1.set_xlabel('Bout Duration (s)')
         ax1.set_ylabel('Magnitude (% of CP)')
-        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>105% CP)')
+        ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>100% CP)')
         ax1.grid(alpha=0.4)
 
     # Common plotting logic for both chart styles
@@ -192,7 +192,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
             ax1.plot(x_values, y_values, 'k:', linewidth=0.7, label=f"{depletion}% W'")
 
     # Set common axis limits
-    ax1.set_ylim(105, max(250, magnitudes.max() * 1.1 if not magnitudes.empty else 250))
+    ax1.set_ylim(100, max(250, magnitudes.max() * 1.1 if not magnitudes.empty else 250))
     ax1.set_xlim(0, 70)
     
     # Customize legend for the research plot
