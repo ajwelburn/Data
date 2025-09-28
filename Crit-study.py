@@ -173,4 +173,81 @@ def generate_excel_output(all_files_data, cp, w_prime):
 # -------------------
 # Streamlit App UI & Main Logic
 # -------------------
-st.title("🚴 Multi
+st.title("🚴 Multi-File Cycling Bout & W'bal Analysis Tool")
+
+with st.sidebar:
+    st.header("⚙️ User Inputs")
+    uploaded_files = st.file_uploader("1. Upload FIT file(s)", type=["fit"], accept_multiple_files=True)
+    st.markdown("---"); st.subheader("2. Set Parameters")
+    cp = st.number_input("Critical Power (CP) in Watts", 100, 600, 250, 1)
+    w_prime_kj = st.number_input("W' (W prime) in kJ", 5.0, 50.0, 20.0, 0.5)
+    w_prime = w_prime_kj * 1000
+    st.markdown("---"); st.subheader("W'bal Model Parameters (Tau)")
+    tau_A = st.number_input("Parameter A", value=350.0, step=10.0, format="%.1f")
+    tau_B = st.number_input("Parameter B (negative)", value=-0.3, step=0.01, format="%.2f")
+    st.markdown("---"); analyze_button = st.button("Analyze Files", type="primary", use_container_width=True)
+
+if not uploaded_files:
+    st.info("Upload one or more FIT files and click 'Analyze Files' to begin.")
+else:
+    if analyze_button:
+        with st.spinner('Analyzing files... This may take a moment.'):
+            all_files_data = []
+            st.header("Individual File Analysis")
+            for file in uploaded_files:
+                with st.expander(f"▶️ Analysis for: **{file.name}**", expanded=True):
+                    data_df = parse_fit_file(io.BytesIO(file.getvalue()))
+                    if not isinstance(data_df, pd.DataFrame) or data_df.empty:
+                        st.error(f"Could not process {file.name} or no power data found."); continue
+                    
+                    bouts_df = analyze_bouts(data_df['time'], data_df['power'], cp)
+                    w_bal_series = calculate_w_prime_balance(data_df['power'], cp, w_prime, tau_A, tau_B)
+                    depletion_count, zone_data, depletion_times = calculate_depletions_and_zones(w_bal_series, w_prime, data_df['time'])
+                    
+                    all_files_data.append({'name': file.name, 'bouts_df': bouts_df, 'duration': data_df['time'].max(), 'depletion_count': depletion_count, 'zone_data': zone_data})
+                    
+                    st.subheader("High-Intensity Bout Analysis")
+                    if not bouts_df.empty:
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Total Bouts", f"{len(bouts_df)}")
+                        col2.metric("Avg. Magnitude", f"{bouts_df['magnitude'].mean():.1f}% CP")
+                        col3.metric("Avg. Duration", f"{bouts_df['duration'].mean():.1f} s")
+                    else:
+                        st.write("No high-intensity bouts detected.")
+                    
+                    st.markdown("---"); st.subheader("W' Balance (W'bal) Analysis")
+                    col_wbal_1, col_wbal_2 = st.columns([2, 1])
+                    with col_wbal_1:
+                        st.pyplot(plot_w_prime_balance(data_df['time'], w_bal_series, w_prime))
+                        st.pyplot(plot_depletions(depletion_times, data_df['time'].max()))
+                    with col_wbal_2:
+                        st.metric("Critical Depletions (<15% W'bal) 🔥", depletion_count)
+                        st.dataframe(zone_data); st.bar_chart(zone_data['Time (%)'])
+
+            if all_files_data:
+                st.markdown("---"); st.header("📊 Combined Analysis for All Files")
+                st.subheader("Combined Summary Metrics")
+                combined_bouts_df = pd.concat([f['bouts_df'] for f in all_files_data if not f['bouts_df'].empty], ignore_index=True)
+                total_depletions = sum(f['depletion_count'] for f in all_files_data)
+                
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Bouts (All Files)", f"{len(combined_bouts_df)}" if not combined_bouts_df.empty else "0")
+                c2.metric("Overall Avg. Magnitude", f"{combined_bouts_df['magnitude'].mean():.1f}% CP" if not combined_bouts_df.empty else "N/A")
+                c3.metric("Overall Avg. Duration", f"{combined_bouts_df['duration'].mean():.1f} s" if not combined_bouts_df.empty else "N/A")
+                c4.metric("Total Critical Depletions 🔥", total_depletions)
+
+                if not combined_bouts_df.empty:
+                    create_summary_plots(combined_bouts_df, cp, w_prime, title_prefix="Combined ")
+
+                st.subheader("Combined W'bal Time in Zones")
+                total_duration_all = sum(f['duration'] for f in all_files_data)
+                if total_duration_all > 0:
+                    total_zone_seconds = sum(f['zone_data']['Time (s)'] for f in all_files_data)
+                    combined_zones_df = pd.DataFrame({'Total Time (s)': total_zone_seconds, 'Total Time (%)': (total_zone_seconds / total_duration_all * 100).round(2)})
+                    st.dataframe(combined_zones_df); st.bar_chart(combined_zones_df['Total Time (%)'])
+
+                st.markdown("---"); st.header("⬇️ Download All Data")
+                excel_data = generate_excel_output(all_files_data, cp, w_prime)
+                st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    else:
+        st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
