@@ -141,14 +141,26 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
 
     bout_durations = bouts_df['duration']
     magnitudes = bouts_df['magnitude']
+    # Set default colors from the initial analysis
+    bout_colors = bouts_df['color']
 
     # Apply "Research Grade" styling ONLY for the combined chart
     if "Combined" in title_prefix:
         st.subheader("Combined Magnitude vs. Bout Duration (Research Grade)")
-        # Use a different aspect ratio and high resolution for publication quality
         fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
         
-        # Set font properties for a more formal, academic look
+        # Calculate new bout colors based on W' depletion for the combined chart
+        bouts_df['depletion'] = (cp * (bouts_df['magnitude'] / 100 - 1) * bouts_df['duration']) / w_prime * 100
+
+        def get_depletion_color(depletion):
+            if depletion <= 10: return 'blue'
+            elif depletion <= 20: return 'orange'
+            elif depletion <= 40: return 'yellow'
+            elif depletion <= 50: return 'lightcoral'
+            else: return 'red'
+
+        bout_colors = bouts_df['depletion'].apply(get_depletion_color)
+
         font_settings = {'fontfamily': 'serif', 'fontsize': 12, 'fontweight': 'bold'}
         title_font_settings = {'fontfamily': 'serif', 'fontsize': 16, 'fontweight': 'bold'}
         
@@ -156,15 +168,14 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         ax1.set_ylabel('Magnitude (% of CP)', **font_settings)
         ax1.set_title(f'{title_prefix}Magnitude vs Bout Duration (>100% CP)', **title_font_settings)
 
-        # Make axis lines and ticks bolder for clarity, removing top and right spines
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
         ax1.spines['left'].set_linewidth(1.5)
         ax1.spines['bottom'].set_linewidth(1.5)
         ax1.tick_params(width=1.5, labelsize=10)
         
-        # Use a more subtle grid style
-        ax1.grid(alpha=0.3, linestyle='--')
+        # Remove grid lines for the research grade chart
+        ax1.grid(False)
         
     else:  # Keep original styling for individual file charts
         st.subheader(f"{title_prefix}Magnitude vs. Bout Duration")
@@ -175,7 +186,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         ax1.grid(alpha=0.4)
 
     # Common plotting logic for both chart styles
-    ax1.scatter(bout_durations, magnitudes, c=bouts_df['color'], alpha=0.7, label='Individual Bouts')
+    ax1.scatter(bout_durations, magnitudes, c=bout_colors, alpha=0.7, label='Individual Bouts', edgecolor='black', linewidth=0.2)
     avg_duration = bout_durations.mean()
     avg_magnitude = magnitudes.mean()
     ax1.scatter(avg_duration, avg_magnitude, color='black', marker='X', s=200, edgecolor='white', linewidth=1.5, label=f'Overall Average ({avg_duration:.1f}s, {avg_magnitude:.1f}%)', zorder=5)
@@ -185,7 +196,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
         x_values = range(1, 71)
         w_prime_depleted = w_prime * (depletion / 100)
         y_values = [(((w_prime_depleted / t) + cp) / cp) * 100 for t in x_values]
-        # Use a slightly different line style for the research plot
+        
         if "Combined" in title_prefix:
             ax1.plot(x_values, y_values, 'k--', linewidth=1.0, label=f"{depletion}% W'")
         else:
