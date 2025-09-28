@@ -180,18 +180,6 @@ def plot_w_prime_balance(time_series, w_bal_series, w_prime):
     ax.grid(alpha=0.3)
     return fig
 
-def plot_depletions(depletion_times, total_duration):
-    """Creates a timeline plot showing when critical depletions occurred."""
-    fig, ax = plt.subplots(figsize=(10, 1.5))
-    if depletion_times:
-        ax.vlines(depletion_times, ymin=0, ymax=1, color='red', linestyle='--', linewidth=1.5)
-    ax.set_xlim(0, total_duration if total_duration > 0 else 1)
-    ax.set_ylim(0,1)
-    ax.yaxis.set_visible(False)
-    ax.set_xlabel("Time (s)")
-    ax.set_title("Critical Depletion Events (<15% W'bal)")
-    return fig
-
 def generate_excel_output(all_files_data, cp, w_prime):
     """Generates an Excel file with all analysis data."""
     output = io.BytesIO()
@@ -299,7 +287,6 @@ else:
                     col_wbal_1, col_wbal_2 = st.columns([2, 1])
                     with col_wbal_1:
                         st.pyplot(plot_w_prime_balance(data_df['time'], w_bal_series, w_prime))
-                        st.pyplot(plot_depletions(depletion_times, data_df['time'].max()))
                     with col_wbal_2:
                         st.metric("Critical Depletions (<15% W'bal) 🔥", depletion_count)
                         st.dataframe(zone_data)
@@ -335,3 +322,5 @@ else:
                 st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     else:
         st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
+
+
