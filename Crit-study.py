@@ -161,8 +161,8 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
 
         bout_colors = bouts_df['depletion'].apply(get_depletion_color)
 
-        font_settings = {'fontfamily': 'serif', 'fontsize': 12, 'fontweight': 'bold'}
-        title_font_settings = {'fontfamily': 'serif', 'fontsize': 16, 'fontweight': 'bold'}
+        font_settings = {'fontfamily': 'Arial', 'fontsize': 12, 'fontweight': 'bold'}
+        title_font_settings = {'fontfamily': 'Arial', 'fontsize': 16, 'fontweight': 'bold'}
         
         ax1.set_xlabel('Bout Duration (s)', **font_settings)
         ax1.set_ylabel('Magnitude (% of CP)', **font_settings)
@@ -189,7 +189,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     ax1.scatter(bout_durations, magnitudes, c=bout_colors, alpha=0.7, label='Individual Bouts', edgecolor='black', linewidth=0.2)
     avg_duration = bout_durations.mean()
     avg_magnitude = magnitudes.mean()
-    ax1.scatter(avg_duration, avg_magnitude, color='black', marker='X', s=200, edgecolor='white', linewidth=1.5, label=f'Overall Average ({avg_duration:.1f}s, {avg_magnitude:.1f}%)', zorder=5)
+    ax1.scatter(avg_duration, avg_magnitude, color='black', marker='X', s=200, edgecolor='white', linewidth=1.5, label=f'Overall Average ({avg_duration:.0f}s, {avg_magnitude:.0f}%)', zorder=5)
 
     # Plot W' depletion curves for reference
     for depletion in range(10, 60, 10):
@@ -209,6 +209,7 @@ def create_summary_plots(bouts_df, cp, w_prime, title_prefix=""):
     # Customize legend for the research plot
     if "Combined" in title_prefix:
         ax1.legend(fontsize=10, frameon=False)
+        fig1.subplots_adjust(top=0.92) # Add space above the title
     else:
         ax1.legend()
         
@@ -390,4 +391,3 @@ else:
                 st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     else:
         st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
-
