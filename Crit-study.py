@@ -322,21 +322,31 @@ with st.sidebar:
     st.markdown("---")
     analyze_button = st.button("Analyze Files", type="primary", use_container_width=True)
 
+# --- Initialize session state variables ---
+if 'analysis_triggered' not in st.session_state:
+    st.session_state.analysis_triggered = False
+if 'time_ranges' not in st.session_state:
+    st.session_state.time_ranges = {}
+    
+# Trigger analysis on button click and reset ranges for the new analysis
+if analyze_button:
+    st.session_state.analysis_triggered = True
+    st.session_state.time_ranges = {}
+
 if not uploaded_files:
+    st.session_state.analysis_triggered = False # Reset if files are removed
     st.info("Upload one or more FIT files and click 'Analyze Files' to begin.")
 else:
-    if analyze_button:
+    # Run analysis if triggered
+    if st.session_state.analysis_triggered:
         with st.spinner('Analyzing files... This may take a moment.'):
             all_files_data = []
             st.header("Individual File Analysis")
 
-            # Initialize session state for storing time ranges
-            if 'time_ranges' not in st.session_state:
-                st.session_state.time_ranges = {}
-
             for file in uploaded_files:
                 with st.expander(f"▶️ Analysis for: **{file.name}**", expanded=True):
-                    data_df = parse_fit_file(io.BytesIO(file.getvalue()))
+                    # Use a cached function to avoid reprocessing files unnecessarily
+                    data_df = parse_fit_file(file)
                     if not isinstance(data_df, pd.DataFrame) or data_df.empty:
                         st.error(f"Could not process {file.name} or no power data found.")
                         continue
@@ -349,9 +359,9 @@ else:
                     st.subheader("W' Balance (W'bal) Analysis")
                     st.pyplot(plot_w_prime_balance(data_df['time'], w_bal_series_full, w_prime))
                     
-                    min_time, max_time = data_df['time'].min(), data_df['time'].max()
+                    min_time, max_time = float(data_df['time'].min()), float(data_df['time'].max())
                     
-                    # Set default range to the full time span if not already set
+                    # Set default range to the full time span if not already set for this file
                     if file.name not in st.session_state.time_ranges:
                         st.session_state.time_ranges[file.name] = (min_time, max_time)
 
@@ -362,6 +372,7 @@ else:
                         value=st.session_state.time_ranges[file.name],
                         key=f"slider_{file.name}"
                     )
+                    # Update the session state with the new slider value
                     st.session_state.time_ranges[file.name] = selected_range
                     start_time, end_time = selected_range
 
@@ -433,4 +444,5 @@ else:
                 st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     else:
         st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
+
 
