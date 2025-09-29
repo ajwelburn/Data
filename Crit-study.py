@@ -100,7 +100,8 @@ def calculate_w_prime_balance(power_series, cp, w_prime, A, B):
 
 def calculate_depletions_and_zones(w_bal_series, w_prime, time_series):
     """Counts critical depletions and calculates time spent in W' balance zones."""
-    total_duration = time_series.max() if not time_series.empty else 0
+    # The total duration for percentage calculation is the length of the selected time series
+    total_duration = len(time_series)
     depletion_threshold = 0.15 * w_prime
     depletion_count = 0
     depletion_times = []
@@ -109,6 +110,7 @@ def calculate_depletions_and_zones(w_bal_series, w_prime, time_series):
     for i, val in enumerate(w_bal_series):
         if val < depletion_threshold and not below_threshold:
             depletion_count += 1
+            # Get the actual time value from the time_series at the specific index
             depletion_times.append(time_series.iloc[i])
             below_threshold = True
         elif val >= depletion_threshold:
@@ -327,47 +329,83 @@ else:
         with st.spinner('Analyzing files... This may take a moment.'):
             all_files_data = []
             st.header("Individual File Analysis")
+
+            # Initialize session state for storing time ranges
+            if 'time_ranges' not in st.session_state:
+                st.session_state.time_ranges = {}
+
             for file in uploaded_files:
                 with st.expander(f"▶️ Analysis for: **{file.name}**", expanded=True):
                     data_df = parse_fit_file(io.BytesIO(file.getvalue()))
                     if not isinstance(data_df, pd.DataFrame) or data_df.empty:
                         st.error(f"Could not process {file.name} or no power data found.")
                         continue
-
+                    
+                    # --- Step 1: Perform initial calculations on the FULL dataset ---
                     bouts_df = analyze_bouts(data_df['time'], data_df['power'], cp)
-                    w_bal_series = calculate_w_prime_balance(data_df['power'], cp, w_prime, tau_A, tau_B)
-                    depletion_count, zone_data, depletion_times = calculate_depletions_and_zones(w_bal_series, w_prime, data_df['time'])
+                    w_bal_series_full = calculate_w_prime_balance(data_df['power'], cp, w_prime, tau_A, tau_B)
 
+                    # --- Step 2: Display full data plots and the new time range slider ---
+                    st.subheader("W' Balance (W'bal) Analysis")
+                    st.pyplot(plot_w_prime_balance(data_df['time'], w_bal_series_full, w_prime))
+                    
+                    min_time, max_time = data_df['time'].min(), data_df['time'].max()
+                    
+                    # Set default range to the full time span if not already set
+                    if file.name not in st.session_state.time_ranges:
+                        st.session_state.time_ranges[file.name] = (min_time, max_time)
+
+                    selected_range = st.slider(
+                        "Select time range (seconds) for Zone Analysis:",
+                        min_value=min_time,
+                        max_value=max_time,
+                        value=st.session_state.time_ranges[file.name],
+                        key=f"slider_{file.name}"
+                    )
+                    st.session_state.time_ranges[file.name] = selected_range
+                    start_time, end_time = selected_range
+
+                    # --- Step 3: Filter data based on the selected range for Zone Analysis ---
+                    time_mask = (data_df['time'] >= start_time) & (data_df['time'] <= end_time)
+                    w_bal_series_filtered = w_bal_series_full[time_mask]
+                    time_series_filtered = data_df['time'][time_mask]
+
+                    depletion_count, zone_data, _ = calculate_depletions_and_zones(
+                        w_bal_series_filtered, w_prime, time_series_filtered
+                    )
+
+                    # --- Step 4: Display the filtered results and append to all_files_data ---
+                    col_wbal_1, col_wbal_2 = st.columns([1, 1])
+                    with col_wbal_1:
+                        st.metric(f"Critical Depletions in Selection (<15% W'bal) 🔥", depletion_count)
+                        st.dataframe(zone_data)
+                    with col_wbal_2:
+                         st.bar_chart(zone_data['Time (%)'])
+
+                    # Store data for combined analysis. Note: duration is now the length of the selection
                     all_files_data.append({
-                        'name': file.name, 'bouts_df': bouts_df, 'duration': data_df['time'].max(),
-                        'depletion_count': depletion_count, 'zone_data': zone_data
+                        'name': file.name,
+                        'bouts_df': bouts_df, # Bouts are from the full file
+                        'duration': len(time_series_filtered), # Duration of the selected range
+                        'depletion_count': depletion_count, # Depletions from the selected range
+                        'zone_data': zone_data # Zone data from the selected range
                     })
-
-                    st.subheader("High-Intensity Bout Analysis")
+                    
+                    st.markdown("---")
+                    st.subheader("High-Intensity Bout Analysis (Full File)")
                     if not bouts_df.empty:
                         col1, col2, col3 = st.columns(3)
                         col1.metric("Total Bouts", f"{len(bouts_df)}")
                         col2.metric("Avg. Magnitude", f"{bouts_df['magnitude'].mean():.1f}% CP")
                         col3.metric("Avg. Duration", f"{bouts_df['duration'].mean():.1f} s")
                         
-                        # --- FIX: Call the plot function for each individual file ---
                         create_summary_plots(bouts_df, cp, w_prime, title_prefix="")
                     else:
                         st.write("No high-intensity bouts detected.")
 
-                    st.markdown("---")
-                    st.subheader("W' Balance (W'bal) Analysis")
-                    col_wbal_1, col_wbal_2 = st.columns([2, 1])
-                    with col_wbal_1:
-                        st.pyplot(plot_w_prime_balance(data_df['time'], w_bal_series, w_prime))
-                    with col_wbal_2:
-                        st.metric("Critical Depletions (<15% W'bal) 🔥", depletion_count)
-                        st.dataframe(zone_data)
-                        st.bar_chart(zone_data['Time (%)'])
-
             if all_files_data:
                 st.markdown("---")
-                st.header("📊 Combined Analysis for All Files")
+                st.header("📊 Combined Analysis for All Files (Based on Selections)")
                 st.subheader("Combined Summary Metrics")
                 combined_bouts_df = pd.concat([f['bouts_df'] for f in all_files_data if not f['bouts_df'].empty], ignore_index=True)
                 total_depletions = sum(f['depletion_count'] for f in all_files_data)
@@ -395,3 +433,4 @@ else:
                 st.download_button(label="📥 Download Full Analysis as Excel File", data=excel_data, file_name=f'full_analysis_{cp}W_CP.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     else:
         st.info(f"✅ **{len(uploaded_files)} file(s) loaded.** Adjust parameters and click 'Analyze Files' to process.")
+
